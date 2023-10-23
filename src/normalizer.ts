@@ -1,9 +1,8 @@
 import {JSONSchemaTypeName, LinkedJSONSchema, NormalizedJSONSchema, Parent} from './types/JSONSchema'
-import {appendToDescription, escapeBlockComment, isSchemaLike, justName, log, toSafeString, traverse} from './utils'
+import {appendToDescription, escapeBlockComment, isSchemaLike, justName, toSafeString, traverse, warning} from './utils'
 import {Options} from './'
 import {DereferencedPaths} from './resolver'
 import {isDeepStrictEqual} from 'util'
-import {link} from './linker'
 
 type Rule = (
   schema: LinkedJSONSchema,
@@ -234,18 +233,15 @@ rules.set('Transform nullable to null type', schema => {
     if (schema.const !== null) {
       schema.enum = [schema.const, null]
       delete schema.const
+      warning('normalizer', 'const should be set to null when schema is nullable', schema)
     }
   } else if (schema.enum) {
     if (!schema.enum.includes(null)) {
       schema.enum.push(null)
-      log('yellow', 'normalizer', 'enum should include null when schema is nullable', schema)
+      warning('normalizer', 'enum should include null when schema is nullable', schema)
     }
   } else if (schema.type) {
     schema.type = [...[schema.type].flatMap(value => value), 'null']
-  } else if (schema.anyOf) {
-    schema.anyOf.push(link({type: 'null'}, schema.anyOf))
-  } else if (schema.oneOf) {
-    schema.oneOf.push(link({type: 'null'}, schema.oneOf))
   }
 })
 
