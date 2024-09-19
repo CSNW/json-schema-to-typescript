@@ -1,6 +1,7 @@
 import {JSONSchemaTypeName, LinkedJSONSchema, NormalizedJSONSchema, Parent} from './types/JSONSchema'
 import {appendToDescription, escapeBlockComment, isSchemaLike, justName, toSafeString, traverse, warning} from './utils'
 import {Options} from './'
+import {applySchemaTyping} from './applySchemaTyping'
 import {DereferencedPaths} from './resolver'
 import {isDeepStrictEqual} from 'util'
 
@@ -21,6 +22,9 @@ function isObjectType(schema: LinkedJSONSchema) {
 }
 function isArrayType(schema: LinkedJSONSchema) {
   return schema.items !== undefined || hasType(schema, 'array') || hasType(schema, 'any')
+}
+function isEnumTypeWithoutTsEnumNames(schema: LinkedJSONSchema) {
+  return schema.type === 'string' && schema.enum !== undefined && schema.tsEnumNames === undefined
 }
 
 rules.set('Remove `type=["null"]` if `enum=[null]`', schema => {
@@ -248,6 +252,28 @@ rules.set('Transform const to singleton enum', schema => {
   if (schema.const !== undefined) {
     schema.enum = [schema.const]
     delete schema.const
+  }
+})
+
+rules.set('Add tsEnumNames to enum types', (schema, _, options) => {
+  if (isEnumTypeWithoutTsEnumNames(schema) && options.inferStringEnumKeysFromValues) {
+    schema.tsEnumNames = schema.enum?.map(String)
+  }
+})
+
+// Precalculation of the schema types is necessary because the ALL_OF type
+// is implemented in a way that mutates the schema object. Detection of the
+// NAMED_SCHEMA type relies on the presence of the $id property, which is
+// hoisted to a parent schema object during the ALL_OF type implementation,
+// and becomes unavailable if the same schema is used in multiple places.
+//
+// Precalculation of the `ALL_OF` intersection schema is necessary because
+// the intersection schema needs to participate in the schema cache during
+// the parsing step, so it cannot be re-calculated every time the schema
+// is encountered.
+rules.set('Pre-calculate schema types and intersections', schema => {
+  if (schema !== null && typeof schema === 'object') {
+    applySchemaTyping(schema)
   }
 })
 

@@ -70,7 +70,19 @@ export interface LinkedJSONSchema extends JSONSchema {
   not?: LinkedJSONSchema
 }
 
-export interface NormalizedJSONSchema extends LinkedJSONSchema {
+export const Types = Symbol('Types')
+export const Intersection = Symbol('Intersection')
+
+/**
+ * Normalized JSON schema.
+ *
+ * Note: `definitions` and `id` are removed by the normalizer. Use `$defs` and `$id` instead.
+ */
+export interface NormalizedJSONSchema extends Omit<LinkedJSONSchema, 'definitions' | 'id'> {
+  [Intersection]?: NormalizedJSONSchema
+  [Parent]: NormalizedJSONSchema | null
+  [Types]: ReadonlySet<SchemaType>
+
   additionalItems?: boolean | NormalizedJSONSchema
   additionalProperties: boolean | NormalizedJSONSchema
   extends?: string[]
@@ -92,14 +104,10 @@ export interface NormalizedJSONSchema extends LinkedJSONSchema {
   oneOf?: NormalizedJSONSchema[]
   not?: NormalizedJSONSchema
   required: string[]
-
-  // Removed by normalizer
-  definitions: never
-  id: never
 }
 
 export interface EnumJSONSchema extends NormalizedJSONSchema {
-  enum: any[]
+  enum: JSONSchema4Type[]
 }
 
 export interface NamedEnumJSONSchema extends NormalizedJSONSchema {
@@ -123,7 +131,7 @@ export interface CustomTypeJSONSchema extends NormalizedJSONSchema {
   tsType: string
 }
 
-export const getRootSchema = memoize((schema: LinkedJSONSchema): LinkedJSONSchema => {
+export const getRootSchema = memoize((schema: NormalizedJSONSchema): NormalizedJSONSchema => {
   const parent = schema[Parent]
   if (!parent) {
     return schema

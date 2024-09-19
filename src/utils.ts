@@ -1,6 +1,9 @@
 import {deburr, isPlainObject, trim, upperFirst} from 'lodash'
 import {basename, dirname, extname, normalize, sep, posix} from 'path'
-import {JSONSchema, LinkedJSONSchema, Parent} from './types/JSONSchema'
+import {Intersection, JSONSchema, LinkedJSONSchema, NormalizedJSONSchema, Parent} from './types/JSONSchema'
+import {JSONSchema4} from 'json-schema'
+import yaml from 'js-yaml'
+import type {Format} from 'cli-color'
 
 // TODO: pull out into a separate package
 export function Try<T>(fn: () => T, err: (e: Error) => any): T {
@@ -69,6 +72,26 @@ function traverseArray(
   arr.forEach((s, k) => traverse(s, callback, processed, k.toString()))
 }
 
+function traverseIntersection(
+  schema: LinkedJSONSchema,
+  callback: (schema: LinkedJSONSchema, key: string | null) => void,
+  processed: Set<LinkedJSONSchema>,
+) {
+  if (typeof schema !== 'object' || !schema) {
+    return
+  }
+
+  const r = schema as unknown as Record<string | symbol, unknown>
+  const intersection = r[Intersection] as NormalizedJSONSchema | undefined
+  if (!intersection) {
+    return
+  }
+
+  if (Array.isArray(intersection.allOf)) {
+    traverseArray(intersection.allOf, callback, processed)
+  }
+}
+
 export function traverse(
   schema: LinkedJSONSchema,
   callback: (schema: LinkedJSONSchema, key: string | null) => void,
@@ -128,6 +151,7 @@ export function traverse(
   if (schema.not) {
     traverse(schema.not, callback, processed)
   }
+  traverseIntersection(schema, callback, processed)
 
   // technically you can put definitions on any key
   Object.keys(schema)
@@ -226,7 +250,7 @@ export function log(style: LogStyle, title: string, ...messages: unknown[]): voi
   if (messages.length > 1 && typeof messages[messages.length - 1] !== 'string') {
     lastMessage = messages.splice(messages.length - 1, 1)
   }
-  console.info(require('cli-color').whiteBright.bgCyan('debug'), getStyledTextForLogging(style)?.(title), ...messages)
+  console.info(color()?.whiteBright.bgCyan('debug'), getStyledTextForLogging(style)?.(title), ...messages)
   if (lastMessage) {
     console.dir(lastMessage, {depth: 6, maxArrayLength: 6})
   }
@@ -238,19 +262,19 @@ function getStyledTextForLogging(style: LogStyle): ((text: string) => string) | 
   }
   switch (style) {
     case 'blue':
-      return require('cli-color').whiteBright.bgBlue
+      return color()?.whiteBright.bgBlue
     case 'cyan':
-      return require('cli-color').whiteBright.bgCyan
+      return color()?.whiteBright.bgCyan
     case 'green':
-      return require('cli-color').whiteBright.bgGreen
+      return color()?.whiteBright.bgGreen
     case 'magenta':
-      return require('cli-color').whiteBright.bgMagenta
+      return color()?.whiteBright.bgMagenta
     case 'red':
-      return require('cli-color').whiteBright.bgRedBright
+      return color()?.whiteBright.bgRedBright
     case 'white':
-      return require('cli-color').black.bgWhite
+      return color()?.black.bgWhite
     case 'yellow':
-      return require('cli-color').whiteBright.bgYellow
+      return color()?.whiteBright.bgYellow
   }
 }
 
@@ -336,26 +360,6 @@ export function maybeStripDefault(schema: LinkedJSONSchema): LinkedJSONSchema {
   return schema
 }
 
-/**
- * Removes the schema's `$id`, `name`, and `description` properties
- * if they exist.
- * Useful when parsing intersections.
- *
- * Mutates `schema`.
- */
-export function maybeStripNameHints(schema: JSONSchema): JSONSchema {
-  if ('$id' in schema) {
-    delete schema.$id
-  }
-  if ('description' in schema) {
-    delete schema.description
-  }
-  if ('name' in schema) {
-    delete schema.name
-  }
-  return schema
-}
-
 export function appendToDescription(existingDescription: string | undefined, ...values: string[]): string {
   if (existingDescription) {
     return `${existingDescription}\n\n${values.join('\n')}`
@@ -363,10 +367,12 @@ export function appendToDescription(existingDescription: string | undefined, ...
   return values.join('\n')
 }
 
-export function isSchemaLike(schema: LinkedJSONSchema) {
+export function isSchemaLike(schema: any): schema is LinkedJSONSchema {
   if (!isPlainObject(schema)) {
     return false
   }
+
+  // top-level schema
   const parent = schema[Parent]
   if (parent === null) {
     return true
@@ -390,4 +396,34 @@ export function isSchemaLike(schema: LinkedJSONSchema) {
   }
 
   return true
+}
+
+export function parseFileAsJSONSchema(filename: string | null, contents: string): JSONSchema4 {
+  if (filename != null && isYaml(filename)) {
+    return Try(
+      () => yaml.load(contents.toString()) as JSONSchema4,
+      () => {
+        throw new TypeError(`Error parsing YML in file "${filename}"`)
+      },
+    )
+  }
+
+  return Try(
+    () => JSON.parse(contents.toString()),
+    () => {
+      throw new TypeError(`Error parsing JSON in file "${filename}"`)
+    },
+  )
+}
+
+function isYaml(filename: string) {
+  return filename.endsWith('.yaml') || filename.endsWith('.yml')
+}
+
+function color(): Format {
+  let cliColor
+  try {
+    cliColor = require('cli-color')
+  } catch {}
+  return cliColor
 }
